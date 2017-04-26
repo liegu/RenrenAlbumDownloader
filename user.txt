@@ -1,0 +1,3 @@
+[conf]
+threadnumber = 10
+cookie =
