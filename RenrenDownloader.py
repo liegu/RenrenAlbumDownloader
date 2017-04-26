@@ -4,31 +4,28 @@
 # email:   et@everet.org
 # website: http://EverET.org
 #
-from imp import reload
-import sys
-from setuptools.compat import execfile
+# update 2017/04/26 by liegu.petesky
+# https://github.com/liegu
+import ConfigParser
+import string
 
 from Renren import SuperRenren
-import time, os
 
 def main():
-    dl, dg = {}, {}
-    execfile('user.txt', dg, dl)
+
+    cf = ConfigParser.ConfigParser()
+    cf.read("user.txt")
     try:
-        username = dl['username']
-        password = dl['password']
-        cookie = dl['cookie']
+        #账户
+        cookie =   cf.get("conf", "cookie")
+        threadnumber=string.atoi(cf.get("conf", "threadnumber"))
     except:
         pass
 
     renren = SuperRenren()
-    if renren.Create(username, password) or renren.CreateByCookie(cookie):
-        # renren.PostMsg(time.asctime())
-        # renren.PostGroupMsg('387635422', '%s' % time.asctime())
-        # renren.DownloadAlbum('333982368', 'sss') 
-        # renren.DownloadAlbum('285201751', 'cai')
-        # renren.DownloadAlbum('305263375', 'cai') 
-        renren.DownloadAllFriendsAlbums(threadnumber=100)
+    if renren.CreateByCookie(cookie):
+
+       renren.DownloadAllFriendsAlbums(threadnumber=threadnumber)
     
 if __name__ == '__main__':
     main()
