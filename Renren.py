@@ -2,12 +2,13 @@
 # Filename:Renren.py
 # 作者：华亮
 #
-from HTMLParser import HTMLParser
-from Queue import Empty, Queue
-from re import match
+# update 2017/04/26 by liegu.petesky
+# https://github.com/liegu
+
+from Queue import Queue
 from urllib import urlencode
-import os, re, json, sys
-import threading, time
+import os, re, json
+import threading
 import urllib, urllib2, socket
 import shelve
 import logging, logging.handlers
@@ -42,20 +43,28 @@ class RenrenRequester:
     '''
     人人访问器
     '''
-    LoginUrl = 'http://www.renren.com/Login.do'
-
     def CreateByCookie(self, cookie):
         logger.info("Trying to login by cookie")
+        #从用户cookie中拿到用户id
+        kvTmp=cookie.split(';')
+        for kv in kvTmp:
+             kv=kv.strip()
+             if(kv[:2]=='id'):
+                 node=kv.split('=')
+                 self.userid=node[1]
+
+        self.LoginUrl='http://www.renren.com/%s' % (self.userid)
         cookieFile = urllib2.HTTPCookieProcessor()
         self.opener = urllib2.build_opener(cookieFile)
-        self.opener.addheaders = [('User-agent', 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.4 (KHTML, like Gecko) Chrome/22.0.1229.92 Safari/537.4'),
+        self.opener.addheaders = [('User-agent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/52.0.2743.116 Safari/537.36'),
                                   ('Cookie', cookie),
                                   ]
-        
+
         req = urllib2.Request(self.LoginUrl)
 
         try:
             result = self.opener.open(req)
+
         except:
             logger.error("CreateByCookie Failed", exc_info=True)
             return False
@@ -65,57 +74,28 @@ class RenrenRequester:
 
         return True
 
-    
-    # 输入用户和密码的元组
-    def Create(self, username, password):
-        logger.info("Trying to login by password")
-        loginData = {'email':username,
-                'password':password,
-                'origURL':'http://www.renren.com',
-                'formName':'',
-                'method':'',
-                'isplogin':'true',
-                'submit':'登录'}
-        postData = urlencode(loginData)
-        cookieFile = urllib2.HTTPCookieProcessor()
-        self.opener = urllib2.build_opener(cookieFile)
-        self.opener.addheaders = [('User-agent', 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.4 (KHTML, like Gecko) Chrome/22.0.1229.92 Safari/537.4')]
-        req = urllib2.Request(self.LoginUrl, postData)
-        result = self.opener.open(req)
-
-        if not self.__FindInfoWhenLogin(result):
-            return False
-
-        return True
 
     def __FindInfoWhenLogin(self, result):
         result_url = result.geturl()
         logger.info(result_url)
         
         rawHtml = result.read()
-        # print(rawHtml)
-
-        # 获取用户id
-        useridPattern = re.compile(r'\'id\':\'(\d+?)\'')
         try:
-            self.userid = useridPattern.search(rawHtml).group(1)
+            jsonStr= rawHtml[rawHtml.find('nx.user =') + 11:rawHtml.find('nx.user.isvip')-2]
+            jsonStr=jsonStr.replace('"','').replace('\'','')
+            kvTmp=jsonStr.split(',')
+            for kv in kvTmp:
+                kv=kv.strip()
+                if(kv[:12]=='requestToken'):
+                    node=kv.split(':')
+                    self.requestToken=node[1].strip()
+
+                if(kv[:4]=='_rtk'):
+                    node=kv.split(':')
+                    self._rtk=node[1].strip()
         except:
             print('Failed...')
             return False
-        # 查找requestToken
-        pos = rawHtml.find("get_check:'")
-        if pos == -1: return False        
-        rawHtml = rawHtml[pos + 11:]
-        token = match('-\d+', rawHtml)
-        if token is None:
-            token = match('\d+', rawHtml)
-            if token is None: return False
-        self.requestToken = token.group()  
-
-        # 查找_rtk
-        pos = rawHtml.find("get_check_x:'")
-        if pos == -1: return False        
-        self._rtk = rawHtml[pos + 13:pos + 13 +8]
 
         logger.info('Login renren.com successfully.')
         logger.info("userid: %s, token: %s, rtk: %s" % (self.userid, self.requestToken, self._rtk))
@@ -274,29 +254,29 @@ class RenrenAlbumDownloader2012:
 
         返回元组列表（相册名，地址）
         '''
-        # print(rawHtml)
-        albumUrlPattern = re.compile(r'''</div></a>.*?<a href="(.*?)\?frommyphoto" class="album-title">.*?<span class="album-name">(.*?)</span>''', re.S)
-
         albums = []
-        for album_url, album_name in albumUrlPattern.findall(rawHtml):
-            album_name = album_name.strip()
-            album_name = album_name.replace('<i class="privacy-icon picon-friend"></i>', '')
-            album_name = album_name.replace('<i class="privacy-icon picon-custom"></i>', '')
-            if album_name == '<span class="userhead">':
-                album_name = u"头像相册"
-            elif album_name == '<span class="phone">':
-                album_name = u"手机相册"
-            elif album_name.startswith('<i class="privacy-icon picon-password"></i>'):
-                continue
-            elif album_name == '<span class="password">': # 有密码，跳过
-                continue
-            logger.info("album_url: [%s]  album_name: [%s]" % (album_url, album_name))
-            albums.append((album_name, album_url))
+        jsonStr=rawHtml
+        jsonStr = jsonStr[jsonStr.find('\'albumList\': [{"') + 12:jsonStr.find('\'isAdmin\': false,')-2]
+        try:
+
+            tmp=json.loads(jsonStr)
+
+            for node in tmp:
+                album_name=node['albumName']
+                album_url="http://photo.renren.com/photo/%i/album-%s/bypage/ajax/v7" % (node['ownerId'], node['albumId'])
+                albums.append((album_name, album_url))
+
+        except ValueError:
+            logger.error("Json Error", exc_info=True)
+        finally:
+             logger.info("Json info", exc_info=True)
+
 
         return albums
 
     def __GetImgUrlsInAlbum(self, album_url):
-        album_url += "/bypage/ajax?curPage=0&pagenum=100" # pick 100 pages which has 20 per page
+        #单个相册最多取100张图片
+        album_url="%s?page=1&pageSize=%i&requestToken=%s&_rtk=%s" % (album_url,100,self.requester.requestToken,self.requester._rtk)
         rawHtml, url = self.requester.Request(album_url)            
         rawHtml = unicode(rawHtml, "utf-8")
 
@@ -489,12 +469,12 @@ class SuperRenren:
         用户接口
     '''
     # 创建
-    def Create(self, username, password):
-        self.requester = RenrenRequester()
-        if self.requester.Create(username, password):
-            self.__GetInfoFromRequester()
-            return True
-        return False
+    # def Create(self, username, password):
+    #     self.requester = RenrenRequester()
+    #     if self.requester.Create(username, password):
+    #         self.__GetInfoFromRequester()
+    #         return True
+    #     return False
 
     def CreateByCookie(self, cookie):
         self.requester = RenrenRequester()
